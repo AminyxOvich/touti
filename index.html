@@ -259,14 +259,15 @@ body.started .cue{opacity:1}
 .a-btns{display:flex;gap:10px;margin-top:22px;transition:height .5s ease,opacity .4s ease,margin .5s ease}
 .a-btn{flex:1;height:52px;border-radius:26px;font:500 17px/1 var(--ui);letter-spacing:-.02em;white-space:nowrap;transition:transform .45s cubic-bezier(.3,1.3,.5,1),background .3s,color .3s}
 .a-btn:active{transform:scale(.96)}
-.a-btn.no{background:rgba(255,255,255,.12);color:#fff}
+.a-btn.no{background:rgba(255,255,255,.12);color:#fff;touch-action:manipulation;-webkit-user-select:none;user-select:none}
 .a-btn.yes{background:var(--blue);color:#fff;font-weight:600}
 .alert.done .a-btns{height:0;margin-top:0;opacity:0;overflow:hidden}
 #forgive.show{min-height:92svh;justify-content:center}
 /* "Not yet" breaks out of the alert and runs */
 .a-btn.no.loose{position:absolute;z-index:9;flex:none;height:52px;padding:0 24px;background:rgba(58,66,98,.92);
   backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);box-shadow:0 12px 30px rgba(0,0,0,.45),inset 0 0 0 .5px rgba(255,255,255,.18);
-  transition:left .5s cubic-bezier(.3,1.35,.5,1),top .5s cubic-bezier(.3,1.35,.5,1),transform .4s cubic-bezier(.3,1.35,.5,1),background .4s}
+  transition:left .18s cubic-bezier(.16,1,.3,1),top .18s cubic-bezier(.16,1,.3,1),transform .18s ease,background .3s;
+  touch-action:manipulation;-webkit-user-select:none;user-select:none}
 .a-btn.no.tired{background:var(--blue);font-weight:600}
 .a-btn.gone{opacity:0;transform:scale(.6)!important;pointer-events:none}
 
@@ -912,7 +913,7 @@ const TIRED = noLines.length - 1;
 let tries = 0, forgiven = false, loose = false, lastEscape = 0;
 function escape(px, py) {
   const now = performance.now();
-  if (forgiven || tries >= TIRED || now - lastEscape < 280) return;
+  if (forgiven || tries >= TIRED || now - lastEscape < 90) return;
   lastEscape = now;
   const sec = fsec.getBoundingClientRect(), b = no.getBoundingClientRect();
   if (!loose) {
@@ -923,13 +924,24 @@ function escape(px, py) {
   burst(b.left + b.width / 2, b.top + b.height / 2, 2, [1.6, 2.4], [.26, .38]);
   tries++; no.textContent = noLines[tries];
   const w = no.offsetWidth, h = no.offsetHeight, a = $('#alert').getBoundingClientRect();
-  const top = Math.max(0, -sec.top) + 70, bot = Math.min(sec.height, innerHeight - sec.top) - h - 20;
+  const minLeft = 16, maxLeft = Math.max(16, sec.width - w - 16);
+  let topBound = Math.max(16, -sec.top + 16);
+  let botBound = Math.min(sec.height - h - 16, window.innerHeight - sec.top - h - 16);
+  if (botBound < topBound) {
+    const mid = (topBound + botBound) / 2;
+    topBound = Math.max(16, mid - 20);
+    botBound = Math.min(sec.height - h - 16, mid + 20);
+  }
   let best = null, bs = -1e9;
-  for (let i = 0; i < 18; i++) {
-    const x = rand(16, sec.width - w - 16), y = rand(top, Math.max(top, bot));
-    const cx = sec.left + x + w / 2, cy = sec.top + y + h / 2;
+  for (let i = 0; i < 25; i++) {
+    const x = rand(minLeft, maxLeft);
+    const y = rand(topBound, Math.max(topBound, botBound));
+    const cx = sec.left + x + w / 2;
+    const cy = sec.top + y + h / 2;
     const overAlert = cx + w / 2 > a.left - 10 && cx - w / 2 < a.right + 10 && cy + h / 2 > a.top - 10 && cy - h / 2 < a.bottom + 10;
-    const s = Math.hypot(cx - px, cy - py) - (overAlert ? 600 : 0);
+    const dist = Math.hypot(cx - px, cy - py);
+    let s = dist - (overAlert ? 450 : 0);
+    if (dist < 130) s -= 400;
     if (s > bs) { bs = s; best = [x, y]; }
   }
   no.style.left = best[0] + 'px'; no.style.top = best[1] + 'px';
@@ -939,17 +951,46 @@ function escape(px, py) {
     setTimeout(() => { no.textContent = 'Fine, forgive'; no.classList.add('tired'); }, 1100);
   }
 }
-// with a mouse it runs before you reach it; with a finger it runs the moment you touch it
+// with a mouse it runs before you reach it; with touch/phone it dodges instantly on tap, touch, or click
 document.addEventListener('pointermove', e => {
   if (e.pointerType !== 'mouse' || !fsec.classList.contains('show') || forgiven || tries >= TIRED) return;
   const b = no.getBoundingClientRect();
   if (Math.abs(e.clientX - (b.left + b.width / 2)) < b.width / 2 + 34 && Math.abs(e.clientY - (b.top + b.height / 2)) < b.height / 2 + 30) escape(e.clientX, e.clientY);
 });
-no.addEventListener('pointerdown', e => { if (tries < TIRED) { e.preventDefault(); escape(e.clientX, e.clientY); } });
-no.addEventListener('click', () => {
-  if (tries >= TIRED) return forgive(no);
-  const b = no.getBoundingClientRect(); escape(b.left + b.width / 2, b.top + b.height / 2);
-});
+
+const handleNoInteraction = e => {
+  if (tries >= TIRED) {
+    if (e.type === 'click' || (no.classList.contains('tired') && e.type === 'touchstart')) forgive(no);
+    return;
+  }
+  if (e.cancelable) e.preventDefault();
+  e.stopPropagation();
+  let cx, cy;
+  if (e.touches && e.touches.length > 0) {
+    cx = e.touches[0].clientX; cy = e.touches[0].clientY;
+  } else if (e.changedTouches && e.changedTouches.length > 0) {
+    cx = e.changedTouches[0].clientX; cy = e.changedTouches[0].clientY;
+  } else if (typeof e.clientX === 'number') {
+    cx = e.clientX; cy = e.clientY;
+  }
+  const b = no.getBoundingClientRect();
+  escape(cx ?? (b.left + b.width / 2), cy ?? (b.top + b.height / 2));
+};
+
+no.addEventListener('touchstart', handleNoInteraction, { passive: false });
+no.addEventListener('pointerdown', handleNoInteraction);
+no.addEventListener('click', handleNoInteraction);
+
+const checkTouchNear = e => {
+  if (!fsec.classList.contains('show') || forgiven || tries >= TIRED) return;
+  const t = (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0]);
+  if (!t) return;
+  const b = no.getBoundingClientRect();
+  if (Math.abs(t.clientX - (b.left + b.width / 2)) < b.width / 2 + 35 && Math.abs(t.clientY - (b.top + b.height / 2)) < b.height / 2 + 30) {
+    escape(t.clientX, t.clientY);
+  }
+};
+document.addEventListener('touchmove', checkTouchNear, { passive: true });
 yes.addEventListener('click', () => forgive(yes));
 
 function forgive(btn, instant) {
